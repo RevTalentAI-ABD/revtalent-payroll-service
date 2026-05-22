@@ -121,11 +121,11 @@ public class NotificationService {
 
     @Transactional(readOnly = true)
     public List<NotificationResponse> getAllUnreadNotificationsForManager(String username) {
-        Employee manager = employeeRepository.findByUser_Username(username)
-                .orElseThrow(() -> new RuntimeException("Manager not found"));
-        return notificationRepository.findByEmployee_Manager_IdAndReadFalse(manager.getId()).stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+        return employeeRepository.findByUser_Username(username)
+                .map(manager -> notificationRepository.findByEmployee_Manager_IdAndReadFalse(manager.getId()).stream()
+                        .map(this::toResponse)
+                        .collect(Collectors.toList()))
+                .orElse(List.of());
     }
 
     // ── Targeted helpers used by Leave & Announcement flows ───────────────────

@@ -34,7 +34,7 @@ public class PayrollService {
         res.setEmployeeId(p.getEmployee().getId());
         res.setEmployeeName(p.getEmployee().getUser().getName());
         res.setEmployeeCode(p.getEmployee().getEmployeeCode());
-        res.setDepartmentName(p.getEmployee().getDepartment().getName());
+        res.setDepartmentName(p.getEmployee().getDepartment() != null ? p.getEmployee().getDepartment().getName() : "N/A");
         res.setPayMonth(p.getPayMonth());
         res.setPayYear(p.getPayYear());
         res.setBasicSalary(p.getBasicSalary());

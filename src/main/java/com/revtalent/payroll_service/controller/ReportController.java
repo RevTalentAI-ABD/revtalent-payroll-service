@@ -10,7 +10,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/manager/reports")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:5173")
+
 public class ReportController {
     private final ReportService reportService;
 
@@ -31,5 +31,17 @@ public class ReportController {
     @GetMapping("/all")
     public Map<String, Object> getAllReports() {
         return reportService.getAllReports();
+    }
+
+    // ✅ Attendance
+    @GetMapping("/attendance")
+    public Map<String, Object> getAttendance() {
+        return reportService.getAttendanceData();
+    }
+
+    // ✅ Productivity
+    @GetMapping("/productivity")
+    public Map<String, Object> getProductivity() {
+        return reportService.getProductivityData();
     }
 }
