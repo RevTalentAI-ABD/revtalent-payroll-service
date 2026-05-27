@@ -15,7 +15,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/notifications")
 @RequiredArgsConstructor
-
+@org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('EMPLOYEE', 'MANAGER', 'HR_ADMIN')")
 public class NotificationController {
 
     private final NotificationService notificationService;
@@ -58,7 +58,7 @@ public class NotificationController {
         if (isManager) {
             return ResponseEntity.ok(notificationService.getAllNotificationsForManager(auth.getName()));
         }
-        return ResponseEntity.ok(notificationService.getAllNotifications());
+        return ResponseEntity.ok(notificationService.getAllNotificationsForUser(auth.getName()));
     }
 
     @GetMapping("/unread")
@@ -69,15 +69,17 @@ public class NotificationController {
         if (isManager) {
             return ResponseEntity.ok(notificationService.getAllUnreadNotificationsForManager(auth.getName()));
         }
-        return ResponseEntity.ok(notificationService.getAllUnreadNotifications());
+        return ResponseEntity.ok(notificationService.getAllUnreadNotificationsForUser(auth.getName()));
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('EMPLOYEE', 'MANAGER', 'HR_ADMIN')")
     @PutMapping("/read-all")
     public ResponseEntity<String> markAllReadGlobal() {
         notificationService.markAllAsReadGlobal();
         return ResponseEntity.ok("All marked as read");
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR_ADMIN')")
     @PostMapping
     public ResponseEntity<?> create(@RequestBody NotificationRequest dto) {
         return ResponseEntity.ok(notificationService.create(dto));

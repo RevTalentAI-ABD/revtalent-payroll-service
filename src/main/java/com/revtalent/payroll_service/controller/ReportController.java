@@ -10,7 +10,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/manager/reports")
 @RequiredArgsConstructor
-
+@org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('MANAGER', 'HR_ADMIN')")
 public class ReportController {
     private final ReportService reportService;
 

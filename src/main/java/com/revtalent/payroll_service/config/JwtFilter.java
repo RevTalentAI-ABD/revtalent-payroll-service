@@ -29,22 +29,34 @@ public class JwtFilter extends OncePerRequestFilter {
 
         String authHeader = request.getHeader("Authorization");
 
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7);
-            try {
-                String username = jwtUtil.extractUsername(token);
-                String role = jwtUtil.extractRole(token);
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.getWriter().write("Missing or invalid Authorization header");
+            return;
+        }
 
-                if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                    UsernamePasswordAuthenticationToken auth =
-                            new UsernamePasswordAuthenticationToken(
-                                    username,
-                                    null,
-                                    List.of(new SimpleGrantedAuthority("ROLE_" + role))
-                            );
-                    SecurityContextHolder.getContext().setAuthentication(auth);
+        String token = authHeader.substring(7);
+        try {
+            String username = jwtUtil.extractUsername(token);
+            String role = jwtUtil.extractRole(token);
+
+            if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                List<SimpleGrantedAuthority> authorities = new java.util.ArrayList<>();
+                if (role != null) {
+                    authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
                 }
-            } catch (Exception e) { response.setStatus(HttpServletResponse.SC_UNAUTHORIZED); response.getWriter().write("Invalid or expired token"); return; }
+                UsernamePasswordAuthenticationToken auth =
+                        new UsernamePasswordAuthenticationToken(
+                                username,
+                                null,
+                                authorities
+                        );
+                SecurityContextHolder.getContext().setAuthentication(auth);
+            }
+        } catch (Exception e) { 
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED); 
+            response.getWriter().write("Invalid or expired token"); 
+            return; 
         }
 
         filterChain.doFilter(request, response);

@@ -12,7 +12,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/announcements")
-
+@org.springframework.security.access.prepost.PreAuthorize("isAuthenticated()")
 public class AnnouncementController {
 
     @Autowired
@@ -27,6 +27,7 @@ public class AnnouncementController {
         return repository.findAll();
     }
 
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR_ADMIN')")
     @PostMapping
     public ResponseEntity<?> create(@RequestBody Announcement announcement) {
         try {
@@ -48,6 +49,7 @@ public class AnnouncementController {
     }
 
     // DELETE
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('HR_ADMIN')")
     @DeleteMapping("/{id}")
     public void delete(@PathVariable Long id) {
         repository.deleteById(id);

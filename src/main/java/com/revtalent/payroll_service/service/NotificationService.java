@@ -39,7 +39,11 @@ public class NotificationService {
     public Notification create(NotificationRequest dto) {
         Notification n = new Notification();
         n.setMessage(dto.getMessage());
-        n.setType(Notification.Type.valueOf(dto.getType()));
+        try {
+            n.setType(Notification.Type.valueOf(dto.getType()));
+        } catch (IllegalArgumentException e) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Invalid notification type");
+        }
         return notificationRepository.save(n);
     }
 
@@ -47,6 +51,7 @@ public class NotificationService {
 
     @Transactional(readOnly = true)
     public List<NotificationResponseDTO> getNotifications(Long empId) {
+        verifyEmployeeAccess(empId);
         return notificationRepository.findByEmployee_IdOrderByCreatedAtDesc(empId)
                 .stream()
                 .map(NotificationResponseDTO::from)
@@ -55,6 +60,7 @@ public class NotificationService {
 
     @Transactional(readOnly = true)
     public List<NotificationResponseDTO> getUnreadNotifications(Long empId) {
+        verifyEmployeeAccess(empId);
         return notificationRepository.findByEmployee_IdAndReadFalse(empId)
                 .stream()
                 .map(NotificationResponseDTO::from)
@@ -63,6 +69,7 @@ public class NotificationService {
 
     @Transactional(readOnly = true)
     public int getUnreadCount(Long empId) {
+        verifyEmployeeAccess(empId);
         return notificationRepository.countByEmployee_IdAndReadFalse(empId);
     }
 
@@ -70,21 +77,34 @@ public class NotificationService {
     public NotificationResponseDTO markAsRead(Long notifId) {
         Notification notification = notificationRepository.findById(notifId)
                 .orElseThrow(() -> new RuntimeException("Notification not found: " + notifId));
+        verifyEmployeeAccess(notification.getEmployee().getId());
         notification.setRead(true);
         return NotificationResponseDTO.from(notificationRepository.save(notification));
     }
 
     @Transactional
     public void markAllAsRead(Long empId) {
+        verifyEmployeeAccess(empId);
         notificationRepository.markAllAsReadByEmployeeId(empId);
     }
 
     @Transactional
     public void deleteNotification(Long notifId) {
-        if (!notificationRepository.existsById(notifId)) {
-            throw new RuntimeException("Notification not found: " + notifId);
-        }
+        Notification notification = notificationRepository.findById(notifId)
+                .orElseThrow(() -> new RuntimeException("Notification not found: " + notifId));
+        verifyEmployeeAccess(notification.getEmployee().getId());
         notificationRepository.deleteById(notifId);
+    }
+
+    private void verifyEmployeeAccess(Long empId) {
+        org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) return;
+        boolean isAdminOrHR = auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("ROLE_HR"));
+        if (isAdminOrHR) return;
+        Employee emp = employeeRepository.findByUser_Username(auth.getName()).orElse(null);
+        if (emp == null || !emp.getId().equals(empId)) {
+            throw new RuntimeException("Access Denied");
+        }
     }
 
     // ── Manager endpoints (all notifications, no empId scope) ─────────────────
@@ -123,6 +143,24 @@ public class NotificationService {
     public List<NotificationResponse> getAllUnreadNotificationsForManager(String username) {
         return employeeRepository.findByUser_Username(username)
                 .map(manager -> notificationRepository.findByEmployee_Manager_IdAndReadFalse(manager.getId()).stream()
+                        .map(this::toResponse)
+                        .collect(Collectors.toList()))
+                .orElse(List.of());
+    }
+    
+    @Transactional(readOnly = true)
+    public List<NotificationResponse> getAllNotificationsForUser(String username) {
+        return employeeRepository.findByUser_Username(username)
+                .map(emp -> notificationRepository.findByEmployee_IdOrderByCreatedAtDesc(emp.getId()).stream()
+                        .map(this::toResponse)
+                        .collect(Collectors.toList()))
+                .orElse(List.of());
+    }
+    
+    @Transactional(readOnly = true)
+    public List<NotificationResponse> getAllUnreadNotificationsForUser(String username) {
+        return employeeRepository.findByUser_Username(username)
+                .map(emp -> notificationRepository.findByEmployee_IdAndReadFalse(emp.getId()).stream()
                         .map(this::toResponse)
                         .collect(Collectors.toList()))
                 .orElse(List.of());

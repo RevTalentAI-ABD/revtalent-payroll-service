@@ -32,7 +32,7 @@ public class PayrollService {
         PayrollResponse res = new PayrollResponse();
         res.setId(p.getId());
         res.setEmployeeId(p.getEmployee().getId());
-        res.setEmployeeName(p.getEmployee().getUser().getName());
+        res.setEmployeeName(p.getEmployee().getUser() != null ? p.getEmployee().getUser().getName() : "Unknown");
         res.setEmployeeCode(p.getEmployee().getEmployeeCode());
         res.setDepartmentName(p.getEmployee().getDepartment() != null ? p.getEmployee().getDepartment().getName() : "N/A");
         res.setPayMonth(p.getPayMonth());
@@ -52,8 +52,8 @@ public class PayrollService {
 
     // ── Generate Payroll (bulk for all employees) ─────────────────────────────
 
-    @Transactional
-    public List<PayrollResponse> generatePayroll(int month, int year) {
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.SERIALIZABLE)
+    public synchronized List<PayrollResponse> generatePayroll(int month, int year) {
         List<Employee> employees = employeeRepository.findAll();
         List<Payroll> result = new ArrayList<>();
 
@@ -63,16 +63,31 @@ public class PayrollService {
 
             if (exists) continue;
 
+            Payroll template = payrollRepository.findByEmployee_IdOrderByPayYearDescPayMonthDesc(emp.getId())
+                    .stream().findFirst().orElse(null);
+
+            BigDecimal basic = template != null ? orZero(template.getBasicSalary()) : BigDecimal.valueOf(50000);
+            BigDecimal hra = template != null ? orZero(template.getHra()) : BigDecimal.valueOf(10000);
+            BigDecimal allowances = template != null ? orZero(template.getAllowances()) : BigDecimal.valueOf(5000);
+            BigDecimal deductions = template != null ? orZero(template.getDeductions()) : BigDecimal.valueOf(2000);
+            BigDecimal pf = template != null ? orZero(template.getPfDeduction()) : BigDecimal.valueOf(1500);
+            BigDecimal tax = template != null ? orZero(template.getTaxDeduction()) : BigDecimal.valueOf(3000);
+
+            BigDecimal net = basic.add(hra).add(allowances)
+                    .subtract(deductions).subtract(pf).subtract(tax);
+            if (net.compareTo(BigDecimal.ZERO) <= 0) continue;
+
             Payroll p = Payroll.builder()
                     .employee(emp)
                     .payMonth(month)
                     .payYear(year)
-                    .basicSalary(BigDecimal.valueOf(50000))
-                    .hra(BigDecimal.valueOf(10000))
-                    .allowances(BigDecimal.valueOf(5000))
-                    .deductions(BigDecimal.valueOf(2000))
-                    .pfDeduction(BigDecimal.valueOf(1500))
-                    .taxDeduction(BigDecimal.valueOf(3000))
+                    .basicSalary(basic)
+                    .hra(hra)
+                    .allowances(allowances)
+                    .deductions(deductions)
+                    .pfDeduction(pf)
+                    .taxDeduction(tax)
+                    .netPay(net)
                     .status(Payroll.Status.PENDING)
                     .build();
 
@@ -107,8 +122,23 @@ public class PayrollService {
 
     // ── Employee-scoped endpoints ─────────────────────────────────────────────
 
+    private void verifyEmployeeAccess(Long empId) {
+        org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) {
+            throw new RuntimeException("Access Denied");
+        }
+        boolean isPrivileged = auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_HR_ADMIN"));
+        if (isPrivileged) return;
+        Employee emp = employeeRepository.findByUser_Username(auth.getName()).orElse(null);
+        if (emp == null || !emp.getId().equals(empId)) {
+            throw new RuntimeException("Access Denied");
+        }
+    }
+
     @Transactional(readOnly = true)
     public List<PayrollResponse> getByEmployee(Long empId) {
+        verifyEmployeeAccess(empId);
         Employee emp = employeeRepository.findById(empId)
                 .orElseThrow(() -> new RuntimeException("Employee not found: " + empId));
         return payrollRepository.findByEmployee_IdOrderByPayYearDescPayMonthDesc(empId)
@@ -119,6 +149,7 @@ public class PayrollService {
 
     @Transactional(readOnly = true)
     public PayrollResponse getByEmployeeAndMonth(Long empId, int month, int year) {
+        verifyEmployeeAccess(empId);
         Payroll p = payrollRepository
                 .findByEmployee_IdAndPayMonthAndPayYear(empId, month, year)
                 .orElseThrow(() -> new RuntimeException(
@@ -128,6 +159,7 @@ public class PayrollService {
 
     @Transactional(readOnly = true)
     public List<PayrollResponse> getByStatus(Long empId, Payroll.Status status) {
+        verifyEmployeeAccess(empId);
         return payrollRepository.findByEmployee_IdAndStatus(empId, status)
                 .stream()
                 .map(this::mapToResponse)
@@ -196,6 +228,7 @@ public class PayrollService {
             throw new RuntimeException("Only PENDING payrolls can be processed");
         }
 
+        recalculateNetPay(payroll);
         payroll.setStatus(Payroll.Status.PROCESSED);
         return mapToResponse(payrollRepository.save(payroll));
     }
@@ -267,10 +300,21 @@ public class PayrollService {
         return v != null ? v : BigDecimal.ZERO;
     }
 
+    private void recalculateNetPay(Payroll p) {
+        BigDecimal net = orZero(p.getBasicSalary())
+                .add(orZero(p.getHra()))
+                .add(orZero(p.getAllowances()))
+                .subtract(orZero(p.getDeductions()))
+                .subtract(orZero(p.getPfDeduction()))
+                .subtract(orZero(p.getTaxDeduction()));
+        p.setNetPay(net);
+    }
+
 
     public byte[] generateSalarySlip(Long id) {
-
         try {
+            Payroll payroll = findOrThrow(id);
+            verifyEmployeeAccess(payroll.getEmployee().getId());
             ByteArrayOutputStream out = new ByteArrayOutputStream();
 
             Document document = new Document();
@@ -279,8 +323,8 @@ public class PayrollService {
             document.open();
 
             document.add(new Paragraph("Salary Slip"));
-            document.add(new Paragraph("Employee ID: " + id));
-            document.add(new Paragraph("Salary: 70000"));
+            document.add(new Paragraph("Employee Name: " + (payroll.getEmployee().getUser() != null ? payroll.getEmployee().getUser().getName() : "Unknown")));
+            document.add(new Paragraph("Salary: " + payroll.getNetPay()));
 
             document.close();
 
@@ -293,9 +337,10 @@ public class PayrollService {
 
         Payroll payroll = payrollRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Payroll not found"));
-
+        verifyEmployeeAccess(payroll.getEmployee().getId());
+        
         String content = "Salary Slip\n\n" +
-                "Employee: " + payroll.getEmployee().getUser().getName() + "\n" +
+                "Employee: " + (payroll.getEmployee().getUser() != null ? payroll.getEmployee().getUser().getName() : "Unknown") + "\n" +
                 "Basic: " + payroll.getBasicSalary() + "\n" +
                 "Net Pay: " + payroll.getNetPay();
 
@@ -306,36 +351,27 @@ public class PayrollService {
     public List<Payroll> processAllPayroll() {
 
         List<Payroll> list = payrollRepository.findAll();
+        List<Payroll> processed = new ArrayList<>();
 
         for (Payroll p : list) {
+            if (p.getStatus() == Payroll.Status.PAID) continue;
 
-            BigDecimal net = p.getBasicSalary()
-                    .add(p.getHra())
-                    .add(p.getAllowances())
-                    .subtract(p.getDeductions())
-                    .subtract(p.getPfDeduction())
-                    .subtract(p.getTaxDeduction());
-
-
-            p.setNetPay(net);
+            recalculateNetPay(p);
             p.setStatus(Payroll.Status.PROCESSED);
+            processed.add(p);
         }
 
-        return payrollRepository.saveAll(list);
+        return payrollRepository.saveAll(processed);
     }
 
     public Payroll processSingle(Long id) {
 
         Payroll p = payrollRepository.findById(id).orElseThrow();
+        if (p.getStatus() == Payroll.Status.PAID) {
+            throw new RuntimeException("Cannot process a PAID payroll");
+        }
 
-        BigDecimal net = p.getBasicSalary()
-                .add(p.getHra())
-                .add(p.getAllowances())
-                .subtract(p.getDeductions())
-                .subtract(p.getPfDeduction())
-                .subtract(p.getTaxDeduction());
-
-        p.setNetPay(net);
+        recalculateNetPay(p);
         p.setStatus(Payroll.Status.PROCESSED);
 
         return payrollRepository.save(p);
